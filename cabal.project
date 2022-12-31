@@ -1,0 +1,5 @@
+packages: *.cabal
+
+package *
+    optimization: 2
+    ghc-options: -fexpose-all-unfoldings

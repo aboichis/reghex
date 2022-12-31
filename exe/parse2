@@ -1,0 +1,97 @@
+-- {-# LANGUAGE LambdaCase #-}
+-- module Parse where
+
+-- import Text.Megaparsec
+-- import qualified Text.Megaparsec.Char as C
+-- import qualified Text.Megaparsec.Char.Lexer as L
+-- import Data.Bits
+-- import Data.Char
+-- import qualified Data.Text as T
+-- import Data.Text(Text(..))
+-- import Data.Word(Word8(..))
+-- import Data.Void
+-- import Numeric.Natural
+-- import Data.Functor.Classes
+
+-- import RegHex.Misc
+
+-- type Re = Ann (Maybe Natural) Re'
+
+-- data Re' r
+--     = Eps
+--     | Lit !Word8
+--     | AnyLit
+--     | Seq !r !r
+--     | Alt !r !r
+--     | Rep !r
+--     deriving Show
+
+-- instance Show1 Re' where
+--     liftShowsPrec sp _ d = \case
+--         Eps -> showString "Eps"
+--         Lit w -> showString ("Lit ") . showString (show w)
+--         AnyLit -> showString "AnyLit"
+--         Seq p q -> showsBinaryWith sp sp "Seq" d p q
+--         Alt p q -> showsBinaryWith sp sp "Alt" d p q
+--         Rep r -> showsUnaryWith sp "Rep" d r
+
+-- eps = MkAnn Nothing Eps
+-- lit w = MkAnn (Just 1) (Lit w)
+-- anyLit = MkAnn (Just 1) AnyLit
+-- sequ p q = MkAnn (joinCount (ann p) (ann q)) (Seq p q)
+-- alt p q = MkAnn Nothing (Alt p q)
+-- rep r = MkAnn Nothing (Rep r)
+
+
+-- joinCount m n = (+) <$> m <*> n
+    
+
+-- data Modifer = Star | Plus | Question | Repl Integer
+
+
+
+-- parseSpace :: (MonadParsec e s m, Token s ~ Char) => m ()
+-- parseSpace = L.space C.space1 empty empty
+
+-- hexByte :: Parsec Void Text Word8
+-- hexByte = lexeme $ (\x y -> fromIntegral $ shiftL (digitToInt x) 4 .|. (digitToInt) y) <$> C.hexDigitChar <*> C.hexDigitChar
+
+-- lexeme = L.lexeme parseSpace
+-- symbol = L.symbol parseSpace
+
+-- parens = between (symbol "(") (symbol ")")
+-- braces = between (symbol "{") (symbol "}")
+
+-- decimal = lexeme L.decimal
+
+-- plus,star,question,dot,bar :: Parsec Void Text Text
+-- plus = symbol "+"
+-- star = symbol "*"
+-- question = symbol "?"
+-- dot = symbol "."
+-- bar = symbol "|"
+
+-- replicateRe 0 r = eps
+-- replicateRe n r = seq r (replicateRe (n-1) r)
+
+-- regex = foldr1 alt <$> sepBy1 alternative bar
+-- alternative = (\xs -> case xs of [] -> eps; x:xs -> foldl sequ x xs) <$> many sequent
+-- sequent = do
+--     s <- parens regex <|> basic
+--     case recur s of 
+--         Eps -> pure s
+--         _ -> do
+--             m <- optional modifier
+--             pure $ case m of
+--                 Nothing -> s
+--                 Just (Star) -> rep s
+--                 Just (Plus) -> sequ s (rep s)
+--                 Just (Question) -> alt s eps
+--                 Just (Repl n) -> replicateRe n s
+
+-- basic = (lit <$> hexByte) <|> (anyLit <$ dot)
+-- modifier = 
+--     (Plus <$ plus) <|> (Star <$ star) <|> (Question <$ question) <|> (Repl <$> braces decimal)
+
+-- regex' = regex <* eof
+
