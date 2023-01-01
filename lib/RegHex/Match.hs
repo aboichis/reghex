@@ -16,12 +16,10 @@ shift i c m = \case
     Eps -> MkAnn m Eps
     Lit fs f ws ->
         let !n = A.sizeofSmallArray fs
-            !lenW = A.sizeofSmallArray ws
-            !shiftWs = A.createSmallArray lenW (error "impossible") $ \arr -> do --(\j -> let !r = getW m ws (j-1) .* V.unsafeIndex fs j i c in r)
-                A.writeSmallArray arr 0 $! (m .* A.indexSmallArray fs 0 i c)
-                for_ [1..lenW - 1] $ \j ->
-                    A.writeSmallArray arr j $! (A.indexSmallArray ws (j-1) .* A.indexSmallArray fs j i c)
-        in MkAnn (A.indexSmallArray ws (n-1) .* f i c) (Lit fs f shiftWs)
+            !shiftWs = if n == 0 then ws else A.createSmallArray n (error "impossible") $ \arr -> do --(\j -> let !r = getW m ws (j-1) .* V.unsafeIndex fs j i c in r)
+                for_ [0..n - 1] $ \j ->
+                    A.writeSmallArray arr j $! (getArrDefault m ws (j-1) .* A.indexSmallArray fs j i c)
+        in MkAnn (getArrDefault m ws (n-1) .* f i c) (Lit fs f shiftWs)
     Alt (MkAnn _ p) (MkAnn _ q) e -> 
         let !p' = shift i c m p
             !q' = shift i c m q
@@ -33,6 +31,10 @@ shift i c m = \case
     Rep (MkAnn w r) ->
         let !r' = shift i c (m .+ w) r
         in MkAnn (ann r') (Rep r')
+
+getArrDefault m arr i = case i of
+    -1 -> m
+    _ -> A.indexSmallArray arr i
 
 {-# INLINEABLE match #-}
 match :: Semiring s => Reg s c -> [c] -> s
