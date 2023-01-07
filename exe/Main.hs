@@ -18,10 +18,14 @@ import Data.Streaming.Filesystem
 import Control.Exception (bracket)
 import Data.Functor
 import qualified Data.Sequence as Seq
-
+import Control.Monad
 import RegHex.Semirings
 import RegHex.Match
-import Control.Monad (when)
+import KMP
+import qualified Pipes.Prelude as P
+import qualified Pipes as P
+import Control.Monad.Trans.Class(lift)
+
 
 data MatchType = MatchBool | MatchOffsets deriving Show
 data PathType = Dir | File deriving Show
@@ -69,25 +73,42 @@ main = do
   MkArgs matchMay regexSyn pathMay <- runOptParser
   resolveMatchPath matchMay pathMay >>= \case
     Left e -> putStrLn e
-    Right (matchType, pathType, path) -> case matchType of
-      MatchBool -> do
-        let !regexSem = convert @Bool regexSyn
-        case pathType of
-          Dir -> runDir path $ \f -> do
-            r <- runRegex regexSem f
-            when r (putStrLn f)
-          File -> do 
-            r <- runRegex regexSem path
-            print r
-      MatchOffsets -> do
-        let !regexSem = convert @AllOffset regexSyn
-        case pathType of
-          Dir -> runDir path $ \f -> do
-            MkAllOffset set <- runRegex regexSem f
-            for_ (S.toList set) (\r -> putStrLn $ f ++ ": " ++ show r)
-          File -> do
-            MkAllOffset set <- runRegex regexSem path
-            for_ (S.toList set) print
+    Right (matchType, pathType, path) -> case allLit regexSyn of
+      Just kmpPat -> runKMP kmpPat matchType pathType path
+      Nothing -> case matchType of
+        MatchBool -> do
+          let !regexSem = convert @Bool regexSyn
+          case pathType of
+            Dir -> runDir path $ \f -> do
+              r <- runRegex regexSem f
+              when r (putStrLn f)
+            File -> do 
+              r <- runRegex regexSem path
+              print r
+        MatchOffsets -> do
+          let !regexSem = convert @AllOffset regexSyn
+          case pathType of
+            Dir -> runDir path $ \f -> do
+              MkAllOffset set <- runRegex regexSem f
+              for_ (S.toList set) (\r -> putStrLn $ f ++ ": " ++ show r)
+            File -> do
+              MkAllOffset set <- runRegex regexSem path
+              for_ (S.toList set) print
+
+
+runKMP pat matchType pathType path =
+  case pathType of 
+    File -> runKMPFile pat path (act Nothing)
+    Dir -> runDir path (\file -> runKMPFile pat file (act (Just $ file ++ ": ")))
+  where
+  act prefix = case matchType of 
+    MatchBool -> case pathType of
+      Dir -> P.null >=> \b -> unless b (putStrLn $ prependMaybe True prefix)
+      File -> P.null >=> \b -> print (not b)
+    MatchOffsets -> \p -> P.runEffect $ P.for p (\x -> lift $ putStrLn $ prependMaybe x prefix)
+  prependMaybe x = foldr (++) (show x)
+
+runKMPFile pat path act = withBinaryFile path ReadMode (\hndl -> act $ matchKMP pat (B.hGetSome hndl 65536))
 
 -- runRegex :: Semiring s => Reg s Word8 -> FilePath -> IO s
 runRegex regex path = withBinaryFile path ReadMode (\hndl -> matchBytes regex (B.hGetSome hndl 65536))

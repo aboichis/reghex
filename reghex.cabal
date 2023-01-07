@@ -97,7 +97,8 @@ executable reghex
     -- Modules included in this executable, other than Main.
     other-modules:
         Parse,
-        Convert
+        Convert,
+        KMP
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -114,7 +115,10 @@ executable reghex
         filepath,
         directory,
         primitive,
-        streaming-commons
+        streaming-commons,
+        pipes,
+        indexed-traversable,
+        transformers
 
     -- Directories containing source files.
     hs-source-dirs:   exe

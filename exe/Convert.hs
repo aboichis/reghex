@@ -10,6 +10,9 @@ import qualified Data.Sequence as Seq
 import qualified Data.Primitive.SmallArray as A
 import Data.Foldable
 import Data.Word
+import qualified Data.Primitive.PrimArray as PA
+import Control.Monad.ST (runST)
+import Data.Foldable.WithIndex
 
 
 convert :: SemiringIdx s => Parse.Re -> Reg s Word8
@@ -26,3 +29,16 @@ convert = \case
     Parse.Seq p q qs -> foldl' (\r -> seq r . convert) (seq (convert p) (convert q)) qs
     Parse.Alt p q qs -> foldl' (\r -> alt r . convert) (alt (convert p) (convert q)) qs
     Parse.Rep p -> rep (convert p)
+
+
+allLit :: Parse.Re -> Maybe (PA.PrimArray Word8)
+allLit = \case
+    Parse.BasicSeq cs -> runST $ do
+        arr <- PA.newPrimArray (Seq.length cs)
+        ifoldr 
+            (\i c k -> case c of
+                Parse.Lit x -> PA.writePrimArray arr i x >> k
+                _ -> pure Nothing) 
+            (Just <$> PA.unsafeFreezePrimArray arr) 
+            cs
+    _ -> Nothing
