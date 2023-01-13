@@ -15,7 +15,7 @@ import qualified Data.ByteString as B
 import System.IO
 import qualified Data.IntSet as S
 import Data.Streaming.Filesystem
-import Control.Exception (bracket)
+import Control.Exception (bracket, IOException, catch, try)
 import Data.Functor
 import qualified Data.Sequence as Seq
 import Control.Monad
@@ -95,18 +95,18 @@ main = do
               MkAllOffset set <- runRegex regexSem path
               for_ (S.toList set) print
 
-
 runKMP pat matchType pathType path =
   case pathType of 
-    File -> runKMPFile pat path (act Nothing)
-    Dir -> runDir path (\file -> runKMPFile pat file (act (Just $ file ++ ": ")))
+    File -> runKMPFile pat path actFile
+    Dir -> runDir path (\file -> runKMPFile pat file (actDir file))
   where
-  act prefix = case matchType of 
-    MatchBool -> case pathType of
-      Dir -> P.null >=> \b -> unless b (putStrLn $ prependMaybe True prefix)
-      File -> P.null >=> \b -> print (not b)
-    MatchOffsets -> \p -> P.runEffect $ P.for p (\x -> lift $ putStrLn $ prependMaybe x prefix)
-  prependMaybe x = foldr (++) (show x)
+  actFile = case matchType of 
+    MatchBool -> P.null >=> \b -> print (not b)
+    MatchOffsets -> \p -> P.runEffect $ P.for p (lift . print)
+      
+  actDir file = case matchType of
+    MatchBool -> P.null >=> \b -> unless b (putStrLn file)
+    MatchOffsets -> \p -> P.runEffect $ P.for p (\x -> lift $ putStrLn $ file ++ ": " ++ show x)
 
 runKMPFile pat path act = withBinaryFile path ReadMode (\hndl -> act $ matchKMP pat (B.hGetSome hndl 65536))
 
@@ -116,19 +116,33 @@ runRegex regex path = withBinaryFile path ReadMode (\hndl -> matchBytes regex (B
 runDir :: FilePath -> (FilePath -> IO ()) -> IO ()
 runDir f act = loop (Seq.singleton f)
   where
+  loop :: Seq.Seq FilePath -> IO ()
   loop Seq.Empty = pure ()
   loop (d Seq.:<| dirs) = do
-    leftoverDirs <- bracket (openDirStream d) closeDirStream (dirLoop d dirs)
+    leftoverDirs <- bracket (try @IOException $ openDirStream d) (either (const $ pure ()) closeDirStream) $ \me -> do
+      case me of 
+        Left e -> do
+          hPutStrLn stderr $ "ERROR!: Couldn't enumerate directory \"" ++ d ++ "\": " ++ show e
+          pure dirs
+        Right stream -> dirLoop d dirs stream
     loop leftoverDirs
 
+  dirLoop :: FilePath -> Seq.Seq FilePath -> DirStream -> IO (Seq.Seq FilePath)
   dirLoop path initialDirs stream = go initialDirs
     where 
-    go !dirs = readDirStream stream >>= \case
+    go :: Seq.Seq FilePath -> IO (Seq.Seq FilePath)
+    go !dirs = catch @IOException (readDirStream stream) (\e -> print e $> Nothing) >>= \case
       Nothing -> pure dirs
       Just entry -> 
         let fullEntry = path </> entry
-        in getFileType fullEntry >>= \case
-          FTFile -> do
-            act fullEntry *> go dirs
-          FTDirectory -> go (dirs Seq.:|> fullEntry)
-          _ -> go dirs
+        in try @IOException (getFileType fullEntry) >>= \case
+            Left e -> do
+              hPutStrLn stderr $ "ERROR!: While searching file " ++ fullEntry ++ "! " ++ show e
+              go dirs
+            Right ft -> case ft of 
+              FTFile -> do
+                catch @IOException (act fullEntry) 
+                  (\e -> hPutStrLn stderr $ "ERROR!: While searching file " ++ fullEntry ++ "! " ++ show e)
+                go dirs
+              FTDirectory -> go (dirs Seq.:|> fullEntry)
+              _ -> go dirs

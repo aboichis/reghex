@@ -41,4 +41,7 @@ allLit = \case
                 _ -> pure Nothing) 
             (Just <$> PA.unsafeFreezePrimArray arr) 
             cs
+    Parse.Basic c -> case c of
+        Parse.Lit x -> Just $ PA.generatePrimArray 1 (const x)
+        _ -> Nothing
     _ -> Nothing
